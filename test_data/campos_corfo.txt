@@ -1,0 +1,98 @@
+# Campos Fundamentales QA - CORFO
+# Lista de campos que DEBEN estar presentes en los formularios
+# Un campo por línea. Líneas que empiezan con # son comentarios.
+# Esta lista es la fuente de verdad para validación QA.
+
+# ========================================
+# IDENTIFICACIÓN PERSONAL / REPRESENTANTE LEGAL
+# ========================================
+RUT
+Nombre
+Apellido Paterno
+Apellido Materno
+Fecha de Nacimiento
+Email
+Teléfono
+Teléfono Móvil
+Nacionalidad
+
+# ========================================
+# DATOS DE LA EMPRESA / ORGANIZACIÓN
+# ========================================
+RUT Empresa
+Razón Social
+Nombre de Fantasía
+Giro Comercial
+Tipo de Empresa
+Tamaño de Empresa
+Fecha de Inicio de Actividades
+Página Web
+
+# ========================================
+# UBICACIÓN Y DOMICILIO
+# ========================================
+Dirección
+Número
+Región
+Comuna
+Ciudad
+Código Postal
+
+# ========================================
+# INFORMACIÓN DEL PROYECTO
+# ========================================
+Nombre del Proyecto
+Descripción del Proyecto
+Objetivo General
+Objetivos Específicos
+Categoría del Proyecto
+Duración del Proyecto
+Fecha de Inicio del Proyecto
+Fecha de Término del Proyecto
+
+# ========================================
+# INFORMACIÓN FINANCIERA
+# ========================================
+Monto Total del Proyecto
+Monto Solicitado a CORFO
+Aporte Propio
+Otros Aportes
+Moneda
+Cuenta Bancaria
+Banco
+
+# ========================================
+# MERCADO Y CLIENTES
+# ========================================
+Mercado Objetivo
+Descripción del Mercado
+Clientes Potenciales
+Ventaja Competitiva
+
+# ========================================
+# EQUIPO Y RECURSOS
+# ========================================
+Número de Empleados
+Equipo del Proyecto
+Infraestructura Disponible
+
+# ========================================
+# DOCUMENTACIÓN REQUERIDA
+# ========================================
+Certificado de Antecedentes
+Inicio de Actividades (SII)
+Estatutos de la Empresa
+Declaración Jurada Simple
+Cotización o Presupuesto
+Carta Gantt
+Plan de Negocios
+
+# ========================================
+# OTROS
+# ========================================
+Región de Ejecución
+Sector Productivo
+Nivel de Innovación
+Experiencia Previa
+Referencias Comerciales
+
