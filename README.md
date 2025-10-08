@@ -117,8 +117,6 @@ crawlee-corfo/
 Crea un archivo `.env` con tus parámetros:
 
 ```env
-LOGIN_URL=https://ejemplo.com/login
-FORM_URL=https://ejemplo.com/formulario
 TEST_USERNAME=usuario_prueba
 TEST_PASSWORD=password_prueba
 HEADLESS=true
