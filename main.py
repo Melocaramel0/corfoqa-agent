@@ -67,11 +67,18 @@ class FormValidationAgent:
         # Asegurar que existen los directorios de salida
         self.config.ensure_directories()
         
+        # Configurar reintentos según el modo
+        # Solo reintentar automáticamente en modo "full"
+        # En modos individuales (explore, extract, etc.), no reintentar para ver resultados inmediatos
+        max_retries = self.config.max_retries if self.config.mode == "full" else 0
+        
+        logger.info(f"Reintentos configurados: {max_retries} (modo: {self.config.mode})")
+        
         # Crear crawler de Crawlee
         crawler = PlaywrightCrawler(
             headless=self.config.headless,
             browser_type=self.config.browser_type,
-            max_request_retries=self.config.max_retries,
+            max_request_retries=max_retries,
         )
         
         # Definir el handler de requests
@@ -396,8 +403,24 @@ class FormValidationAgent:
             if nueva_postulacion_button:
                 logger.info("Haciendo click en 'Nueva Postulación'...")
                 await nueva_postulacion_button.click()
+                
+                # Esperar a que cargue la página del formulario
                 await page.wait_for_load_state("domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(3000)
+                await page.wait_for_load_state("networkidle", timeout=30000)
+                
+                # Esperar a que aparezca la barra de pasos (específico del formulario CORFO)
+                logger.info("Esperando a que cargue el formulario completo...")
+                try:
+                    await page.wait_for_selector("#BarraPasosContenedor", state="visible", timeout=15000)
+                    # Esperar a que Slick se inicialice
+                    await page.wait_for_selector("#BarraPasosContenedor .carousel.slick-initialized", state="attached", timeout=15000)
+                    # Esperar a que exista .slick-track con al menos 1 li de pasos
+                    await page.wait_for_selector("#BarraPasosContenedor .slick-track li[id^='BotonPaso_']", state="attached", timeout=15000)
+                    logger.info("✓ Formulario cargado - Barra de pasos y pasos detectados")
+                except Exception as e:
+                    logger.warning(f"No se detectaron inmediatamente elementos de Slick: {e}")
+                    await page.wait_for_timeout(5000)
+                
                 logger.info("✓ Click en 'Nueva Postulación' realizado - Accediendo al formulario...")
             else:
                 logger.warning("No se encontró botón 'Nueva Postulación' en la página")
@@ -460,8 +483,21 @@ class FormValidationAgent:
                         if await button.is_visible(timeout=5000):
                             logger.info(f"✓ Botón 'Nueva Postulación' encontrado: {selector}")
                             await button.click()
+                            
+                            # Esperar a que cargue la página del formulario
                             await page.wait_for_load_state("domcontentloaded", timeout=30000)
-                            await page.wait_for_timeout(3000)
+                            await page.wait_for_load_state("networkidle", timeout=30000)
+                            
+                            # Esperar a que aparezca la barra de pasos (específico del formulario CORFO)
+                            logger.info("Esperando a que cargue el formulario completo...")
+                            try:
+                                await page.wait_for_selector("#BarraPasosContenedor", state="visible", timeout=15000)
+                                logger.info("✓ Formulario cargado - Barra de pasos detectada")
+                            except:
+                                # Si no aparece la barra, esperar un poco más por si acaso
+                                logger.warning("No se detectó barra de pasos inmediatamente, esperando más tiempo...")
+                                await page.wait_for_timeout(5000)
+                            
                             logger.info("✓ Click en 'Nueva Postulación' realizado - Accediendo al formulario...")
                             return
                     except:
@@ -544,22 +580,43 @@ class FormValidationAgent:
             self.results["matcher"] = await matcher.match()
     
     async def _run_explore_mode(self, page):
-        """Ejecuta solo modo Explorer"""
+        """
+        Ejecuta solo modo Explorer.
+        Mapea la estructura del formulario sin extraer contenido.
+        """
+        logger.info("Ejecutando modo Explorer...")
         explorer = Explorer(page, self.config)
         self.results["explorer"] = await explorer.explore()
     
     async def _run_extract_mode(self, page):
-        """Ejecuta solo modo Extractor"""
-        extractor = Extractor(page, self.config)
+        """
+        Ejecuta modo Extractor.
+        Si no hay mapa previo del Explorer, lo ejecuta primero para tener la estructura.
+        """
+        logger.info("Ejecutando modo Extractor...")
+        
+        # Ejecutar Explorer primero para obtener el mapa estructural
+        logger.info("Ejecutando Explorer para obtener mapa estructural...")
+        explorer = Explorer(page, self.config)
+        self.results["explorer"] = await explorer.explore()
+        
+        # Extraer contenido usando el mapa
+        extractor = Extractor(page, self.config, self.results["explorer"])
         self.results["extractor"] = await extractor.extract()
     
     async def _run_complete_mode(self, page):
-        """Ejecuta Extractor + Completer"""
-        # Primero extraer
-        extractor = Extractor(page, self.config)
+        """Ejecuta Explorer + Extractor + Completer"""
+        logger.info("Ejecutando modo Complete (Explorer + Extractor + Completer)...")
+        
+        # 1. Explorer
+        explorer = Explorer(page, self.config)
+        self.results["explorer"] = await explorer.explore()
+        
+        # 2. Extractor
+        extractor = Extractor(page, self.config, self.results["explorer"])
         self.results["extractor"] = await extractor.extract()
         
-        # Luego completar
+        # 3. Completer
         if self.results["extractor"].get("success"):
             from modes.extractor import FormField
             field_objects = []
@@ -573,12 +630,18 @@ class FormValidationAgent:
             self.results["completer"] = await completer.complete()
     
     async def _run_validate_mode(self, page):
-        """Ejecuta Extractor + Validator"""
-        # Primero extraer
-        extractor = Extractor(page, self.config)
+        """Ejecuta Explorer + Extractor + Validator"""
+        logger.info("Ejecutando modo Validate (Explorer + Extractor + Validator)...")
+        
+        # 1. Explorer
+        explorer = Explorer(page, self.config)
+        self.results["explorer"] = await explorer.explore()
+        
+        # 2. Extractor
+        extractor = Extractor(page, self.config, self.results["explorer"])
         self.results["extractor"] = await extractor.extract()
         
-        # Luego validar
+        # 3. Validator
         if self.results["extractor"].get("success"):
             from modes.extractor import FormField
             field_objects = []
@@ -592,12 +655,18 @@ class FormValidationAgent:
             self.results["validator"] = await validator.validate()
     
     async def _run_match_mode(self, page):
-        """Ejecuta Extractor + Validator + Matcher"""
-        # Extraer
-        extractor = Extractor(page, self.config)
+        """Ejecuta Explorer + Extractor + Validator + Matcher"""
+        logger.info("Ejecutando modo Match (Explorer + Extractor + Validator + Matcher)...")
+        
+        # 1. Explorer
+        explorer = Explorer(page, self.config)
+        self.results["explorer"] = await explorer.explore()
+        
+        # 2. Extractor
+        extractor = Extractor(page, self.config, self.results["explorer"])
         self.results["extractor"] = await extractor.extract()
         
-        # Validar
+        # 3. Validator
         if self.results["extractor"].get("success"):
             from modes.extractor import FormField
             field_objects = []
@@ -610,7 +679,7 @@ class FormValidationAgent:
             validator = Validator(page, self.config, field_objects)
             self.results["validator"] = await validator.validate()
         
-        # Matcher
+        # 4. Matcher
         if self.results["extractor"].get("success") and self.results["validator"].get("success"):
             from modes.extractor import FormField
             field_objects = []

@@ -27,11 +27,11 @@ python create_sample_pdf.py
 Crea un archivo `.env` con tus credenciales:
 
 ```env
-# URL del formulario objetivo
+# URL del formulario objetivo (opcional)
 FORM_URL=https://convocatoria.corfo.cl/formulario
 
-# Credenciales (opcional, RUT con formato XX.XXX.XXX-X)
-TEST_USERNAME=12.345.678-9
+# Credenciales (RUT y CLAVE)
+TEST_USERNAME=123456789
 TEST_PASSWORD=tu_password
 
 # Configuración
@@ -44,7 +44,7 @@ EVIDENCE_ENABLED=true
 ### Explorar un formulario CORFO
 
 ```bash
-python main.py --mode explore --form-url https://convocatoria.corfo.cl/formulario --no-headless
+python main.py --mode explore --form-url "https://convocatoria.corfo.cl/formulario" --no-headless
 ```
 
 **Nota:** El agente detectará automáticamente si necesita login. Si configuras credenciales en `.env`:

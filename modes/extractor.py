@@ -126,7 +126,13 @@ class Extractor:
     
     async def extract(self, step_index: Optional[int] = None) -> Dict[str, Any]:
         """
-        Ejecuta la extracción de campos.
+        Ejecuta la extracción de campos usando el mapa del Explorer.
+        
+        Proceso:
+        1. Si tiene mapa del Explorer, navega a cada paso
+        2. Expande todos los desplegables del paso
+        3. Hace scroll progresivo para encontrar todos los campos
+        4. Extrae metadatos completos de cada campo
         
         Args:
             step_index: Índice del paso a extraer (None = todos los pasos)
@@ -135,20 +141,33 @@ class Extractor:
             Diccionario con todos los campos extraídos
         """
         logger.info("=== Iniciando modo Extractor ===")
+        logger.info("Objetivo: Extraer metadatos completos de todos los campos")
         
         try:
-            if step_index is not None:
-                # Extraer solo un paso específico
-                await self._extract_step(step_index)
-            elif self.explorer_result and self.explorer_result.get("steps"):
-                # Extraer todos los pasos descubiertos por Explorer
-                for step in self.explorer_result["steps"]:
-                    await self._extract_step(step["index"])
+            if self.explorer_result and self.explorer_result.get("steps"):
+                logger.info(f"Usando mapa del Explorer: {len(self.explorer_result['steps'])} pasos detectados")
+                
+                # Extraer campos de cada paso
+                for step_data in self.explorer_result["steps"]:
+                    if step_index is not None and step_data["index"] != step_index:
+                        continue
+                    
+                    logger.info(f"--- Extrayendo paso {step_data['index'] + 1}: {step_data['title']} ---")
+                    
+                    # Expandir desplegables del paso
+                    await self._expand_collapsibles(step_data.get("collapsibles", []))
+                    
+                    # Extraer campos con scroll progresivo
+                    await self._extract_step_with_scroll(step_data)
+                    
+                    # Navegar al siguiente paso (si no es el último)
+                    if step_index is None and step_data["index"] < len(self.explorer_result["steps"]) - 1:
+                        await self._navigate_next()
             else:
-                # Extraer página actual
+                logger.warning("No hay mapa del Explorer, extrayendo página actual")
                 await self._extract_current_page()
             
-            logger.info(f"Extracción completada: {len(self.fields)} campos encontrados")
+            logger.info(f"=== Extracción completada: {len(self.fields)} campos encontrados ===")
             
             return {
                 "success": True,
@@ -164,9 +183,184 @@ class Extractor:
                 "fields": [field.to_dict() for field in self.fields]
             }
     
+    async def _expand_collapsibles(self, collapsibles: List[Dict]) -> None:
+        """
+        Verifica y expande desplegables si están colapsados.
+        (El Explorer ya debería haberlos expandido, esto es una verificación adicional)
+        
+        Args:
+            collapsibles: Lista de desplegables del paso
+        """
+        if not collapsibles:
+            logger.debug("No hay desplegables para verificar")
+            return
+        
+        logger.debug(f"Verificando {len(collapsibles)} desplegables (incluyendo {len([c for c in collapsibles if c.get('nivel', 0) > 0])} anidados)...")
+        
+        expanded_count = 0
+        for collapsible in collapsibles:
+            try:
+                target_id = collapsible.get("target_id")
+                if not target_id:
+                    continue
+                
+                # Verificar estado actual del desplegable
+                target = self.page.locator(f"#{target_id}")
+                if await target.count() == 0:
+                    continue
+                
+                # Verificar si está colapsado
+                has_in = await target.evaluate("el => el.classList.contains('in')")
+                has_show = await target.evaluate("el => el.classList.contains('show')")
+                is_visible = await target.is_visible()
+                
+                is_collapsed = not (has_in or has_show or is_visible)
+                
+                if is_collapsed:
+                    selector = collapsible.get("selector")
+                    if selector:
+                        trigger = self.page.locator(selector)
+                        if await trigger.count() > 0 and await trigger.is_visible():
+                            nivel = collapsible.get('nivel', 0)
+                            logger.debug(f"  [Nivel {nivel}] Expandiendo: {collapsible['title'][:50]}")
+                            await trigger.click()
+                            await self.page.wait_for_timeout(600)
+                            expanded_count += 1
+                
+            except Exception as e:
+                logger.debug(f"Error verificando desplegable: {e}")
+        
+        if expanded_count > 0:
+            logger.debug(f"✓ Se expandieron {expanded_count} desplegables adicionales")
+        else:
+            logger.debug(f"✓ Todos los desplegables ya estaban expandidos")
+    
+    async def _extract_step_with_scroll(self, step_data: Dict) -> None:
+        """
+        Extrae campos del paso con scroll progresivo para capturar todos los elementos.
+        
+        Args:
+            step_data: Datos del paso del Explorer
+        """
+        try:
+            container = self.page.locator("#seccionRender")
+            
+            # Verificar que el contenedor existe
+            if await container.count() == 0:
+                logger.warning("Contenedor #seccionRender no encontrado")
+                return
+            
+            # Obtener altura total
+            scroll_height = await container.evaluate("el => el.scrollHeight")
+            viewport_height = await container.evaluate("el => el.clientHeight")
+            
+            # Si no requiere scroll, extraer directamente
+            if scroll_height <= viewport_height:
+                await self._extract_visible_fields(step_data["index"])
+                return
+            
+            # Scroll progresivo
+            scroll_step = 300
+            current_scroll = 0
+            
+            logger.debug(f"Iniciando scroll progresivo (altura: {scroll_height}px)")
+            
+            while current_scroll <= scroll_height:
+                # Scroll a la posición
+                await container.evaluate(f"el => el.scrollTop = {current_scroll}")
+                await self.page.wait_for_timeout(300)
+                
+                # Extraer campos visibles
+                await self._extract_visible_fields(step_data["index"])
+                
+                current_scroll += scroll_step
+            
+            # Scroll final para asegurar
+            await container.evaluate("el => el.scrollTop = el.scrollHeight")
+            await self.page.wait_for_timeout(300)
+            await self._extract_visible_fields(step_data["index"])
+            
+        except Exception as e:
+            logger.error(f"Error en extracción con scroll: {e}")
+            # Fallback: extraer sin scroll
+            await self._extract_visible_fields(step_data["index"])
+    
+    async def _extract_visible_fields(self, step_index: int) -> None:
+        """
+        Extrae campos visibles usando atributos data-controlid.
+        Evita duplicados usando un set de IDs ya procesados.
+        
+        Args:
+            step_index: Índice del paso actual
+        """
+        # Set de IDs ya extraídos
+        existing_ids = {f.id for f in self.fields if f.id}
+        
+        # Selectores específicos del formulario CORFO
+        field_selectors = [
+            'input[data-controlid]',
+            'textarea[data-controlid]',
+            'select[data-controlid]',
+            '[data-controlid][contenteditable="true"]'
+        ]
+        
+        for selector in field_selectors:
+            try:
+                fields = self.page.locator(f"#seccionRender {selector}")
+                count = await fields.count()
+                
+                for i in range(count):
+                    field_locator = fields.nth(i)
+                    
+                    try:
+                        # Verificar visibilidad
+                        if not await field_locator.is_visible():
+                            continue
+                        
+                        # Verificar si ya fue extraído
+                        field_id = await field_locator.get_attribute("id")
+                        if field_id and field_id in existing_ids:
+                            continue
+                        
+                        # Extraer campo
+                        field = await self._extract_field(field_locator, step_index, len(self.fields))
+                        if field:
+                            self.fields.append(field)
+                            if field.id:
+                                existing_ids.add(field.id)
+                    
+                    except Exception as e:
+                        logger.debug(f"Error extrayendo campo individual: {e}")
+                        continue
+            
+            except Exception as e:
+                logger.debug(f"Error con selector {selector}: {e}")
+    
+    async def _navigate_next(self) -> bool:
+        """
+        Navega al siguiente paso del formulario.
+        
+        Returns:
+            True si navegó exitosamente
+        """
+        try:
+            next_button = self.page.locator("#BotonSig")
+            
+            if await next_button.count() > 0 and await next_button.is_visible():
+                await next_button.click()
+                await self.page.wait_for_timeout(2000)
+                await self.page.wait_for_load_state("networkidle", timeout=10000)
+                await self.page.wait_for_selector("#seccionRender", state="visible", timeout=10000)
+                logger.debug("Navegado al siguiente paso")
+                return True
+        except Exception as e:
+            logger.error(f"Error navegando: {e}")
+        
+        return False
+    
     async def _extract_step(self, step_index: int) -> None:
         """
-        Extrae campos de un paso específico.
+        Extrae campos de un paso específico (método legacy, mantener por compatibilidad).
         
         Args:
             step_index: Índice del paso
