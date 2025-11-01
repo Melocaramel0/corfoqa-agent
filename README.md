@@ -184,5 +184,5 @@ MIT
 
 ---
 
-**Desarrollado con ❤️ para la comunidad de validación de formularios web**
+**Desarrollado con ❤️ para la comunidad**
 
